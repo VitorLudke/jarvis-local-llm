@@ -1,0 +1,164 @@
+#!/bin/zsh
+# jarvis-mlx — Jarvis on Apple Silicon, one command.
+#
+# This is the script that makes Jarvis what it is on a Mac: it serves local
+# models on the Metal GPU through Apple's MLX framework (mlx-lm / mlx-vlm)
+# and puts the Jarvis workspace in front of them.
+#
+#   text model   mlx_lm.server     127.0.0.1:8081   Metal GPU, OpenAI-compatible
+#   vision model mlx_vlm.server    127.0.0.1:8082   on demand only (see below)
+#   chromadb     chroma run        127.0.0.1:8100   vector memory / RAG
+#   frontend     start-macos.sh    127.0.0.1:7860   the Jarvis UI
+#
+# Usage:
+#   jarvis-mlx               start text + chroma + frontend, open the browser
+#   jarvis-mlx vision        start the vision model on demand (port 8082)
+#   jarvis-mlx vision stop   stop only the vision model (frees ~3 GB)
+#   jarvis-mlx stop          stop everything
+#   jarvis-mlx status        show what's running
+#
+# The vision model does NOT start by default: an 8B text model + draft model
+# + 4B vision model together can exhaust unified memory on a 16 GB Mac and
+# trigger Metal GPU timeouts (kIOGPUCommandBufferCallbackErrorTimeout).
+# Bring vision up only when you need it.
+#
+# Models are MLX-community conversions on Hugging Face, downloaded to the
+# standard HF cache on first run. Override with env vars:
+#   MLX_MODEL        default mlx-community/Qwen3-8B-4bit
+#   MLX_DRAFT_MODEL  default mlx-community/Qwen3-0.6B-4bit
+#                    (speculative decoding, ~1.5x tokens/s; empty disables)
+#   MLX_VL_MODEL     default mlx-community/Qwen3-VL-4B-Instruct-4bit
+#   MLX_VENV         default <repo>/venv-mlx (created on first run)
+#
+# After the first boot, point Jarvis at the model server once in
+# Settings -> Models: endpoint http://127.0.0.1:8081/v1.
+
+set -u
+
+SCRIPT_DIR="${0:A:h}"
+JARVIS_DIR="${JARVIS_DIR:-${SCRIPT_DIR:h}}"
+MLX_VENV="${MLX_VENV:-$JARVIS_DIR/venv-mlx}"
+MLX_MODEL="${MLX_MODEL:-mlx-community/Qwen3-8B-4bit}"
+MLX_DRAFT_MODEL="${MLX_DRAFT_MODEL:-mlx-community/Qwen3-0.6B-4bit}"
+MLX_VL_MODEL="${MLX_VL_MODEL:-mlx-community/Qwen3-VL-4B-Instruct-4bit}"
+MLX_PORT=8081
+MLX_VL_PORT=8082
+CHROMA_PORT=8100
+APP_PORT="${APP_PORT:-7860}"
+LOG_DIR="${JARVIS_LOG_DIR:-$JARVIS_DIR/logs}"
+mkdir -p "$LOG_DIR"
+
+port_pids() { lsof -ti :"$1" 2>/dev/null }
+
+ensure_mlx_venv() {
+  if [[ ! -x "$MLX_VENV/bin/mlx_lm.server" ]]; then
+    echo "Preparando venv MLX em $MLX_VENV (primeira vez)..."
+    python3 -m venv "$MLX_VENV"
+    "$MLX_VENV/bin/pip" install --quiet --upgrade pip mlx-lm mlx-vlm
+  fi
+}
+
+case "${1:-start}" in
+  stop)
+    for port in $APP_PORT $MLX_PORT $MLX_VL_PORT $CHROMA_PORT; do
+      pids=$(port_pids $port)
+      if [[ -n "$pids" ]]; then
+        echo "$pids" | xargs kill && echo "parado: porta $port (pid ${pids//$'\n'/, })"
+      else
+        echo "nada rodando na porta $port"
+      fi
+    done
+    exit 0
+    ;;
+  status)
+    [[ -n "$(port_pids $MLX_PORT)" ]] && echo "modelo:   ok (porta $MLX_PORT)" || echo "modelo:   parado"
+    [[ -n "$(port_pids $MLX_VL_PORT)" ]] && echo "visão:    ok (porta $MLX_VL_PORT)" || echo "visão:    parada (sob demanda: jarvis-mlx vision)"
+    [[ -n "$(port_pids $CHROMA_PORT)" ]] && echo "chroma:   ok (porta $CHROMA_PORT)" || echo "chroma:   parado"
+    [[ -n "$(port_pids $APP_PORT)" ]] && echo "frontend: ok (porta $APP_PORT)" || echo "frontend: parado"
+    exit 0
+    ;;
+  vision)
+    if [[ "${2:-}" == "stop" ]]; then
+      pids=$(port_pids $MLX_VL_PORT)
+      if [[ -n "$pids" ]]; then
+        echo "$pids" | xargs kill && echo "visão parada (porta $MLX_VL_PORT)"
+      else
+        echo "visão já estava parada"
+      fi
+      exit 0
+    fi
+    if [[ -n "$(port_pids $MLX_VL_PORT)" ]]; then
+      echo "Modelo de visão já rodando (porta $MLX_VL_PORT)"
+      exit 0
+    fi
+    ensure_mlx_venv
+    echo "Subindo modelo de visão $MLX_VL_MODEL na porta $MLX_VL_PORT..."
+    nohup "$MLX_VENV/bin/python" -m mlx_vlm.server \
+      --model "$MLX_VL_MODEL" --host 127.0.0.1 --port $MLX_VL_PORT \
+      >> "$LOG_DIR/mlx-vl-server.log" 2>&1 &!
+    printf "Aguardando visão"
+    for i in {1..30}; do
+      if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$MLX_VL_PORT/v1/models"; then
+        echo " — pronta! Endpoint: http://127.0.0.1:$MLX_VL_PORT/v1"
+        exit 0
+      fi
+      printf "."
+      sleep 2
+    done
+    echo
+    echo "Visão não respondeu em 60s — veja $LOG_DIR/mlx-vl-server.log"
+    exit 1
+    ;;
+esac
+
+ensure_mlx_venv
+
+if [[ -z "$(port_pids $MLX_PORT)" ]]; then
+  echo "Subindo modelo $MLX_MODEL na porta $MLX_PORT..."
+  draft_args=()
+  [[ -n "$MLX_DRAFT_MODEL" ]] && draft_args=(--draft-model "$MLX_DRAFT_MODEL" --num-draft-tokens 3)
+  nohup "$MLX_VENV/bin/mlx_lm.server" \
+    --model "$MLX_MODEL" "${draft_args[@]}" --host 127.0.0.1 --port $MLX_PORT \
+    >> "$LOG_DIR/mlx-server.log" 2>&1 &!
+else
+  echo "Modelo já rodando (porta $MLX_PORT)"
+fi
+
+if [[ -n "$(port_pids $MLX_VL_PORT)" ]]; then
+  echo "Modelo de visão já rodando (porta $MLX_VL_PORT) — derrube com: jarvis-mlx vision stop"
+else
+  echo "Modelo de visão não sobe por padrão — quando precisar: jarvis-mlx vision"
+fi
+
+if [[ -z "$(port_pids $CHROMA_PORT)" ]]; then
+  if [[ -x "$JARVIS_DIR/venv/bin/chroma" ]]; then
+    echo "Subindo ChromaDB na porta $CHROMA_PORT..."
+    nohup "$JARVIS_DIR/venv/bin/chroma" run --path "$JARVIS_DIR/data/chroma_server" \
+      --host 127.0.0.1 --port $CHROMA_PORT >> "$LOG_DIR/chroma.log" 2>&1 &!
+  else
+    echo "ChromaDB pulado (venv do app ainda não existe — start-macos.sh cria)"
+  fi
+else
+  echo "ChromaDB já rodando (porta $CHROMA_PORT)"
+fi
+
+if [[ -z "$(port_pids $APP_PORT)" ]]; then
+  echo "Subindo Jarvis na porta $APP_PORT..."
+  (cd "$JARVIS_DIR" && nohup ./start-macos.sh >> "$LOG_DIR/app.log" 2>&1 &!)
+else
+  echo "Jarvis já rodando (porta $APP_PORT)"
+fi
+
+printf "Aguardando frontend"
+for i in {1..60}; do
+  if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$APP_PORT/login"; then
+    echo " — pronto!"
+    open "http://127.0.0.1:$APP_PORT"
+    exit 0
+  fi
+  printf "."
+  sleep 2
+done
+echo
+echo "Frontend não respondeu em 120s — veja $LOG_DIR/app.log"
+exit 1

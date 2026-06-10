@@ -45,10 +45,6 @@ jobs:
   python-tests:
     name: Python tests (pytest)
     runs-on: ubuntu-latest
-    # Informational for now: the suite has known flaky / environment-dependent
-    # failures (test isolation + embedding-model assertions). Tracked under the
-    # ROADMAP "fresh install smoke tests" item; make this required once green.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
@@ -57,4 +53,15 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: mkdir -p data  # sqlite DB lives at ./data/app.db
-      - run: python -m pytest -q
+      # One pytest process per file. Several test files install module-level
+      # stubs (sys.modules MagicMocks, DB engine swaps) that leak into whatever
+      # imports the same modules after them in a shared process — ~18 tests
+      # fail from cross-file pollution in a single run, every file is green on
+      # its own. Sequential (not parallel) because tests share ./data/app.db.
+      - name: pytest (per-file isolation)
+        run: |
+          rc=0
+          for f in tests/test_*.py; do
+            python -m pytest -q --tb=short "$f" || rc=1
+          done
+          exit $rc

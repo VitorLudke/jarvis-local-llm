@@ -25,8 +25,8 @@ End-users cloning the repo will land on `dev` by default. To run the curated/sta
 Docker is the recommended path for normal testing:
 
 ```bash
-git clone https://github.com/pewdiepie-archdaemon/odysseus.git
-cd jarvis
+git clone https://github.com/VitorLudke/jarvis-local-llm.git
+cd jarvis-local-llm
 cp .env.example .env
 docker compose up -d --build
 ```

@@ -8,7 +8,34 @@
 
 ![Jarvis](docs/jarvis.jpg)
 
-A self-hosted AI workspace -- meant to be the self-hosted version of the UI experience you get from ChatGPT and Claude. But with more jank and fun. Running on your own hardware, with your own data -- local-first, privacy-first, and no trojan.
+A self-hosted AI workspace built to run **local language models on Apple
+Silicon Macs**. Chat, agents, memory, documents, email, calendar — the whole
+ChatGPT/Claude-style experience — served by your own M-series GPU, with your
+own data, on your own machine. Local-first, privacy-first, no telemetry.
+
+## Where Jarvis comes from
+
+Jarvis is the joining of two open-source foundations:
+
+- **[Odysseus](https://github.com/vdmkenny/odysseus)** — the self-hosted AI
+  workspace this project forks: the web UI, agent mode, vector memory, RAG,
+  documents, email, calendar, and everything else you see on screen.
+- **[MLX](https://github.com/ml-explore/mlx)** — Apple's machine-learning
+  framework for Apple Silicon. Jarvis serves models on the Metal GPU through
+  [mlx-lm](https://github.com/ml-explore/mlx-lm) (text, with speculative
+  decoding) and [mlx-vlm](https://github.com/Blaizzy/mlx-vlm) (vision), exposed
+  as OpenAI-compatible endpoints the workspace talks to.
+
+Odysseus gave us the workspace; MLX gave us fast local inference on a Mac.
+Jarvis glues them together, tunes the result for M-series unified memory
+(16 GB included), and adds its own fixes and a quiet-luxury redesign on top.
+Everything stays on your machine: conversations, memories, and settings live
+in a local SQLite + ChromaDB under `data/` (never committed), and the built-in
+export (`GET /api/export`) hands you your data as JSON whenever you want it.
+
+It still connects to anything OpenAI-compatible (vLLM, llama.cpp, Ollama,
+OpenRouter, OpenAI), and the upstream Docker/Linux/Windows paths keep working
+— but the Mac is home.
 
 ## Features
   - **Chat** -- chat with any local model or API; adding them is super simple.<br>　<sub>vLLM · llama.cpp · Ollama · OpenRouter · OpenAI</sub>
@@ -59,8 +86,8 @@ pull request guidelines.
 
 ### Docker (recommended)
 ```bash
-git clone https://github.com/pewdiepie-archdaemon/odysseus.git
-cd jarvis
+git clone https://github.com/VitorLudke/jarvis-local-llm.git
+cd jarvis-local-llm
 cp .env.example .env       # optional, but recommended for explicit defaults
 docker compose up -d --build
 ```
@@ -71,8 +98,8 @@ only when you intentionally want LAN/reverse-proxy access.
 
 ### Native Linux / macOS
 ```bash
-git clone https://github.com/pewdiepie-archdaemon/odysseus.git
-cd jarvis
+git clone https://github.com/VitorLudke/jarvis-local-llm.git
+cd jarvis-local-llm
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -84,13 +111,44 @@ downloads and serves. The app itself is lightweight; local model serving is the
 heavy part and depends on the model, runtime, GPU, and VRAM, so small hosts can
 connect to API or remote model servers instead. Use `--host 0.0.0.0` only when you intentionally want LAN/reverse-proxy access.
 
-### Apple Silicon
-Docker on macOS cannot use the Metal GPU. For GPU-accelerated Cookbook on an
-M-series Mac, run Jarvis natively:
+### Apple Silicon (the main path)
+
+This is what Jarvis is built for. One command brings up the whole stack —
+MLX text model on the Metal GPU, ChromaDB for memory/RAG, and the web UI:
 
 ```bash
-git clone https://github.com/pewdiepie-archdaemon/odysseus.git
-cd jarvis
+git clone https://github.com/VitorLudke/jarvis-local-llm.git
+cd jarvis-local-llm
+scripts/jarvis-mlx
+```
+
+On first run it creates an MLX venv (`mlx-lm` + `mlx-vlm`), downloads the
+default model (`mlx-community/Qwen3-8B-4bit`, ~4.3 GB, with a 0.6B draft
+model for ~1.5x speculative decoding), and opens `http://127.0.0.1:7860`.
+Then point Jarvis at the model server once in **Settings → Models**:
+endpoint `http://127.0.0.1:8081/v1`.
+
+What runs where:
+
+| Service | Port | Notes |
+|---|---|---|
+| `mlx_lm.server` (text) | 8081 | Metal GPU, OpenAI-compatible |
+| `mlx_vlm.server` (vision) | 8082 | **on demand**: `scripts/jarvis-mlx vision` |
+| ChromaDB | 8100 | vector memory + RAG |
+| Jarvis UI | 7860 | the workspace |
+
+The vision model doesn't start by default: text (8B) + draft + vision (4B)
+together can exhaust unified memory on a 16 GB Mac and trigger Metal GPU
+timeouts. Bring it up when you need it, drop it with
+`scripts/jarvis-mlx vision stop`. Other subcommands: `stop`, `status`.
+Swap models via env vars (`MLX_MODEL`, `MLX_DRAFT_MODEL`, `MLX_VL_MODEL`) —
+anything from the [mlx-community](https://huggingface.co/mlx-community) hub
+works.
+
+Prefer to manage pieces yourself? `./start-macos.sh` starts only the web UI
+(installs Homebrew deps, creates the venv, runs setup):
+
+```bash
 ./start-macos.sh
 ```
 
@@ -252,8 +310,9 @@ docker compose logs jarvis | grep -E 'ChromaDB|MemoryVectorStore|DEGRADED'
 
 **macOS details.** `start-macos.sh` installs Homebrew deps, creates the venv,
 runs setup, and starts uvicorn on port `7860` because AirPlay often holds
-`7000`. It uses llama.cpp/Ollama for Metal. vLLM/SGLang are CUDA/ROCm-only and
-do not run on macOS. MLX-only models are not served by Jarvis.
+`7000`. vLLM/SGLang are CUDA/ROCm-only and do not run on macOS. For Metal,
+MLX is the first-class path (`scripts/jarvis-mlx` — see the Apple Silicon
+section above); llama.cpp/Ollama via Cookbook also work.
 
 </details>
 
@@ -263,16 +322,16 @@ do not run on macOS. MLX-only models are not served by Jarvis.
 server; safe to re-run):
 
 ```powershell
-git clone https://github.com/pewdiepie-archdaemon/odysseus.git
-cd jarvis
+git clone https://github.com/VitorLudke/jarvis-local-llm.git
+cd jarvis-local-llm
 powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1
 ```
 
 Or do it by hand:
 
 ```powershell
-git clone https://github.com/pewdiepie-archdaemon/odysseus.git
-cd jarvis
+git clone https://github.com/VitorLudke/jarvis-local-llm.git
+cd jarvis-local-llm
 py -3.11 -m venv venv
 venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -422,11 +481,11 @@ All user data lives in `data/` (gitignored): `app.db` (sessions, messages, docum
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=pewdiepie-archdaemon%2Fjarvis&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=VitorLudke%2Fjarvis-local-llm&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=pewdiepie-archdaemon/odysseus&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=pewdiepie-archdaemon/odysseus&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=pewdiepie-archdaemon/odysseus&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=VitorLudke/jarvis-local-llm&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=VitorLudke/jarvis-local-llm&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=VitorLudke/jarvis-local-llm&type=date&legend=top-left" />
  </picture>
 </a>
 

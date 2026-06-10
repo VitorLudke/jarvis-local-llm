@@ -14,7 +14,13 @@ def test_no_duplicate_tail_chunk():
 
 
 def test_no_chunk_is_contained_in_another():
-    text = "".join(chr(33 + (k % 90)) for k in range(2000))
+    # Position-stamped text: 500 distinct 4-char blocks ("0000".."0499"), so no
+    # window of one chunk can reappear inside another. The previous 90-char
+    # repeating alphabet made the final chunk a substring of chunk 1 by
+    # construction (start offsets 1600 and 70 are congruent mod 90), so the
+    # assertion failed even with a correct splitter. The duplicate-tail bug is
+    # still caught: its extra chunk repeats the previous chunk's suffix verbatim.
+    text = "".join(f"{k:04d}" for k in range(500))
     chunks = split_chunks(text, size=1000, overlap=200)
     # The buggy version produced a final 200-char chunk fully inside the prior one.
     for a in range(len(chunks)):

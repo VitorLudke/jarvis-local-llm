@@ -153,13 +153,19 @@ def test_document_owner_filter_applies_owner_clause():
 # gallery._owner_filter
 # ---------------------------------------------------------------------------
 
-def test_gallery_owner_filter_blocks_anonymous():
+def test_gallery_owner_filter_passes_anonymous_single_user():
     from routes.gallery_routes import _owner_filter
     fake_q = MagicMock()
     out = _owner_filter(fake_q, user=None)
-    # Anonymous → q.filter(False) → contradiction, empty result set.
-    fake_q.filter.assert_called_once_with(False)
-    assert out is fake_q.filter.return_value
+    # Anonymous = single-user mode (auth disabled): get_current_user returns
+    # None and there is no per-user scoping — the operator sees everything.
+    # Mirrors the main library list / stats (`if user is not None`) and the
+    # _owner_filter docstring in routes/gallery_helpers.py; the old
+    # fail-closed `filter(False)` behavior emptied the tag sidebars and made
+    # the tag-cleanup endpoints silently no-op in self-hosted single-user
+    # deployments.
+    fake_q.filter.assert_not_called()
+    assert out is fake_q
 
 
 def test_gallery_owner_filter_passes_user():

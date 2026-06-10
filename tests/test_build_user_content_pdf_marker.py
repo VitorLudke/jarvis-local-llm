@@ -53,5 +53,8 @@ def test_pdf_body_marker_stripped_without_eating_text(monkeypatch, tmp_path):
     # The leading page text must survive intact.
     assert "[Page 1 text]:" in body
     assert "to the board, the agenda is set" in body
-    # The old lstrip(chars) corruption ate "[P" then "to" -> "age 1 text]: the board".
-    assert "age 1 text" not in body
+    # The old lstrip(chars) corruption ate "[P" then "to" -> "age 1 text]: the
+    # board". "age 1 text" is a substring of the INTACT "[Page 1 text]:" marker,
+    # so a plain `not in` can never pass — instead require every occurrence to
+    # be part of an intact marker (a standalone one means the prefix was eaten).
+    assert body.count("age 1 text") == body.count("[Page 1 text")

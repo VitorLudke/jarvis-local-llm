@@ -9,6 +9,24 @@ issue — it will be corrected promptly.
 
 ---
 
+## Foundations
+
+Jarvis exists by joining two projects:
+
+- **[Odysseus](https://github.com/vdmkenny/odysseus)** — the self-hosted AI
+  workspace this repository forks. The web UI, agent mode, memory/RAG, email,
+  calendar, documents, and most of the codebase originate there. Copyright ©
+  2025 Odysseus Contributors. **MIT License** (notice preserved in
+  [`LICENSE`](LICENSE)).
+- **[MLX](https://github.com/ml-explore/mlx)** — Apple's machine-learning
+  framework for Apple Silicon, plus
+  [mlx-lm](https://github.com/ml-explore/mlx-lm) (text serving) and
+  [mlx-vlm](https://github.com/Blaizzy/mlx-vlm) (vision serving, by Prince
+  Canuma & contributors). Jarvis runs local models on the Metal GPU through
+  them (`scripts/jarvis-mlx`). **MIT License.**
+
+---
+
 ## Adapted / borrowed code
 
 Portions of this project were adapted from other open-source repositories.

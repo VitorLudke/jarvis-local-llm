@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from core.database import Document, DocumentVersion
 from core.database import Session as DbSession
+from src.auth_helpers import _auth_disabled
 from src.upload_handler import UploadHandler
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,12 @@ def _verify_doc_owner(db, doc: Document, user: str):
     openable / cloneable. We trust that column first and only fall back to
     the session join for any not-yet-backfilled legacy row.
     """
-    if user is None:
+    if not user:
+        # AUTH_ENABLED=false is anonymous single-user mode: the operator
+        # owns every document, so ownership is a no-op (mirrors
+        # require_user / owner_filter semantics).
+        if _auth_disabled():
+            return
         raise HTTPException(403, "Authentication required")
     if doc.owner is not None:
         if doc.owner != user:
@@ -103,7 +109,12 @@ def _owner_session_filter(q, user):
     The owner backfill runs in init_db before the app serves requests, so
     by the time this filter is live there are no NULL-owner rows to leak;
     we therefore match the owner strictly."""
-    if user is None:
+    if not user:
+        # Anonymous single-user mode (AUTH_ENABLED=false): no ownership
+        # scoping — the operator sees every document, including rows the
+        # boot backfill stamped with the legacy admin owner.
+        if _auth_disabled():
+            return q
         return q.filter(False)
     return q.filter(Document.owner == user)
 

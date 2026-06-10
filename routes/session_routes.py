@@ -11,7 +11,7 @@ from core.session_manager import SessionManager
 from core.models import ChatMessage
 from src.request_models import SessionResponse
 from core.database import Session as DbSession, SessionLocal, Document, GalleryImage
-from src.auth_helpers import get_current_user, effective_user
+from src.auth_helpers import get_current_user, effective_user, _auth_disabled
 
 
 def _sanitize_export_filename(name: str) -> str:
@@ -73,6 +73,11 @@ def _verify_session_owner(request: Request, session_id: str, session_manager=Non
     """
     user = effective_user(request)
     if not user:
+        # AUTH_ENABLED=false is anonymous single-user mode: the operator owns
+        # every session, so ownership is a no-op (mirrors require_user /
+        # owner_filter semantics). With auth on, anonymous stays rejected.
+        if _auth_disabled():
+            return
         raise HTTPException(403, "Authentication required")
     db = SessionLocal()
     try:
@@ -659,8 +664,12 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         try:
             q = db.query(DbSession).filter(DbSession.archived == True)
             if not user:
-                raise HTTPException(403, "Authentication required")
-            q = q.filter(DbSession.owner == user)
+                # Anonymous single-user mode sees every archived session;
+                # with auth on, anonymous stays rejected.
+                if not _auth_disabled():
+                    raise HTTPException(403, "Authentication required")
+            else:
+                q = q.filter(DbSession.owner == user)
             if search:
                 safe_search = search.replace('%', r'\%').replace('_', r'\_')
                 q = q.filter(DbSession.name.ilike(f"%{safe_search}%", escape='\\'))

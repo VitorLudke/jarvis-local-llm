@@ -238,36 +238,43 @@ class _KokoroPipeline:
     def _init(self):
         try:
             import torch
-            from kokoro import KPipeline
+            from kokoro import KPipeline  # noqa: F401 — probe import only
 
-            if not torch.cuda.is_available():
-                logger.warning("CUDA not available for Kokoro TTS")
-                return
-
-            self.device = torch.device("cuda:0")
-            with torch.cuda.device(0):
-                self.pipeline = KPipeline(lang_code="a")
-                if hasattr(self.pipeline, "model"):
-                    self.pipeline.model = self.pipeline.model.to(self.device)
+            # CUDA > MPS (Apple Silicon) > CPU. The 82M model is small enough
+            # that MPS/CPU synthesis stays faster than realtime.
+            if torch.cuda.is_available():
+                self.device = "cuda"
+            elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                self.device = "mps"
+            else:
+                self.device = "cpu"
+            self._pipelines = {}
             self.available = True
-            logger.info("Kokoro-82M TTS pipeline loaded")
+            logger.info(f"Kokoro-82M TTS ready (device={self.device})")
         except ImportError as e:
             logger.warning(f"Kokoro TTS not available: {e}")
             logger.warning("Install with: pip install kokoro soundfile")
         except Exception as e:
             logger.error(f"Kokoro init failed: {e}", exc_info=True)
 
+    def _pipeline_for(self, voice: str):
+        # Kokoro voices encode the language in the first letter of the voice
+        # id (af_heart -> 'a' American English, pf_dora -> 'p' pt-BR, ...).
+        lang = (voice or "a")[0]
+        if lang not in self._pipelines:
+            from kokoro import KPipeline
+            self._pipelines[lang] = KPipeline(lang_code=lang, device=self.device)
+        return self._pipelines[lang]
+
     def synthesize_raw(self, text: str, voice: str = "af_heart") -> Optional[bytes]:
         if not self.available:
             return None
         try:
-            import torch
             import numpy as np
 
-            with torch.cuda.device(self.device):
-                chunks = []
-                for _, _, audio in self.pipeline(text, voice=voice):
-                    chunks.append(audio)
+            chunks = []
+            for _, _, audio in self._pipeline_for(voice)(text, voice=voice):
+                chunks.append(audio)
 
             if not chunks:
                 return None

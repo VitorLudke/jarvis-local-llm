@@ -15,7 +15,7 @@ numpy
 # still degrades to keyword fallback if they're ever missing.
 # chromadb-client is the lightweight HTTP client (talks to a standalone
 # ChromaDB service); fastembed runs local ONNX embeddings.
-chromadb-client
+chromadb  # full package: o start-macos.sh removia chromadb-client e force-reinstalava chromadb a cada boot, estourando o pin do tokenizers
 fastembed
 youtube-transcript-api
 # Markdown rendering for research reports (src/visual_report.py).
@@ -43,3 +43,6 @@ qrcode[pil]
 croniter
 pytest
 pytest-asyncio
+
+# Kokoro TTS: transformers exige tokenizers <=0.23.0 (0.23.0 nao existe no PyPI; usar 0.22.x)
+tokenizers>=0.22.0,<0.23

@@ -1,10 +1,10 @@
-# Contributing to Odysseus
+# Contributing to Jarvis
 
 Thanks for helping. The project is moving quickly, so the best contributions are focused, easy to review, and easy to test.
 
 ## Branch model
 
-Odysseus has two branches:
+Jarvis has two branches:
 
 - **`dev`** — where all PRs land. Things can be in flux here; the merge button gets used freely.
 - **`main`** — what users run. Curated and tested by the maintainer. Fast-forwarded to a stable `dev` commit at each release.
@@ -26,7 +26,7 @@ Docker is the recommended path for normal testing:
 
 ```bash
 git clone https://github.com/pewdiepie-archdaemon/odysseus.git
-cd odysseus
+cd jarvis
 cp .env.example .env
 docker compose up -d --build
 ```
@@ -57,7 +57,7 @@ For Docker-related changes:
 ```bash
 docker compose config
 docker compose up -d --build
-docker compose logs --tail=120 odysseus
+docker compose logs --tail=120 jarvis
 ```
 
 Mention what you ran in the pull request description. If you could not run a check, say so.
@@ -78,7 +78,7 @@ Please keep PRs small. Large PRs that mix unrelated cleanup, formatting, refacto
 
 ## Style and visual changes
 
-Odysseus has an intentional visual style. PRs that ignore it will be closed without merge, no matter how correct the underlying code is.
+Jarvis has an intentional visual style. PRs that ignore it will be closed without merge, no matter how correct the underlying code is.
 
 Before submitting any change that affects what the app looks like — buttons, icons, fonts, colors, spacing, layout, CSS, HTML, SVG, or any `static/js/` module that draws to the DOM — please:
 

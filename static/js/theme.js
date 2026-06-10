@@ -9,6 +9,11 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 
 export const THEMES = {
+  // Luxe pair — quiet-luxury redesign (warm ink + champagne / ivory + bronze).
+  // Selecting either one also toggles :root.luxe, which activates the
+  // typography/refinement layer in static/luxe.css.
+  atelier:    { bg:'#131110', fg:'#eae3d3', panel:'#1a1714', border:'#39322a', red:'#c5a368' },
+  gallery:    { bg:'#f1ede4', fg:'#312d27', panel:'#faf8f2', border:'#d9d2c3', red:'#8f7344' },
   dark:       { bg:'#282c34', fg:'#9cdef2', panel:'#111111', border:'#355a66', red:'#e06c75' },
   light:      { bg:'#f0ebe3', fg:'#5a5248', panel:'#faf6f0', border:'#d4cdc2', red:'#c47d5a' },
   midnight:   { bg:'#0d1117', fg:'#c9d1d9', panel:'#161b22', border:'#30363d', red:'#f85149' },
@@ -31,21 +36,40 @@ export const THEMES = {
   cute:       { bg:'#fff0f5', fg:'#d4608a', panel:'#fff8fa', border:'#f0c0d0', red:'#ff6b9d' },
 };
 
-const DEFAULT_THEME = 'dark';
-const LS_KEY = 'odysseus-theme';
-const CUSTOM_THEMES_KEY = 'odysseus-custom-themes';
+const DEFAULT_THEME = 'atelier';
+const LS_KEY = 'jarvis-theme';
+const CUSTOM_THEMES_KEY = 'jarvis-custom-themes';
 
 const FONT_MAP = {
   mono: "'Fira Code', monospace",
   sans: "system-ui, -apple-system, 'Segoe UI', sans-serif",
   serif: "Georgia, 'Times New Roman', serif",
+  luxe: "'Outfit', system-ui, -apple-system, 'Segoe UI', sans-serif",
 };
 const DEFAULT_FONT = 'mono';
 const DEFAULT_DENSITY = 'comfortable';
 const MAX_CUSTOM_THEMES = 8;
 
+// Default font per built-in theme. Themes not listed use DEFAULT_FONT.
+const THEME_DEFAULT_FONT = {
+  atelier:    'luxe',
+  gallery:    'luxe',
+};
+
+// Themes that activate the luxe refinement layer (static/luxe.css).
+const LUXE_THEMES = new Set(['atelier', 'gallery']);
+
+export function applyLuxeClass(name) {
+  const on = LUXE_THEMES.has(name);
+  document.documentElement.classList.toggle('luxe', on);
+  if (on) document.documentElement.dataset.luxe = name;
+  else delete document.documentElement.dataset.luxe;
+}
+
 // Default background patterns for built-in themes
 const THEME_DEFAULT_PATTERN = {
+  atelier:    'constellations',
+  gallery:    'none',
   dark:       'none',
   light:      'dots',
   midnight:   'rain',
@@ -62,6 +86,7 @@ const THEME_DEFAULT_PATTERN = {
 
 // Default effect colors for specific themes (overrides --fg)
 const THEME_DEFAULT_EFFECT_COLOR = {
+  atelier:    '#c5a368',
   midnight:   '#ffffff',
   organs:     '#451616',
   cute:       '#ff8cb8',
@@ -70,6 +95,7 @@ const THEME_DEFAULT_EFFECT_COLOR = {
 
 // Default effect intensity (0..1) per theme. Any theme not listed defaults to 1.
 const THEME_DEFAULT_INTENSITY = {
+  atelier:    0.3,
   midnight:   0.5,
   terminal:   0.8,
   organs:     0.65,
@@ -79,6 +105,24 @@ const THEME_DEFAULT_INTENSITY = {
 const THEME_DEFAULT_FROSTED = {
   lavender:   true,
 };
+
+// One-time migration (jun/2026 luxe redesign): users still on the stock
+// 'dark' default — colors untouched, no font/density overrides — move to the
+// new 'atelier' default. Anyone who customized anything is left alone.
+(function _migrateToLuxeDefault() {
+  try {
+    if (localStorage.getItem('jarvis-luxe-migrated')) return;
+    localStorage.setItem('jarvis-luxe-migrated', '1');
+    const obj = Storage.getJSON(LS_KEY, null);
+    if (!obj) return; // nothing saved — new DEFAULT_THEME applies by itself
+    if (obj.name !== 'dark' || obj.font || obj.density || obj.bgPattern) return;
+    const stock = { bg:'#282c34', fg:'#9cdef2', panel:'#111111', border:'#355a66', red:'#e06c75' };
+    const c = obj.colors || {};
+    const isStock = Object.keys(stock).every(k => String(c[k] || '').toLowerCase() === stock[k]);
+    if (!isStock || c.advanced) return;
+    Storage.setJSON(LS_KEY, { name: 'atelier', colors: { ...THEMES.atelier } });
+  } catch (e) { /* localStorage unavailable — skip */ }
+})();
 
 // ── Custom theme persistence ──
 function _loadCustomThemes() {
@@ -183,7 +227,7 @@ const ADV_KEYS = [
   { key: 'aiBubbleBg',         css: '--ai-bubble-bg',      label: 'AI Chat Bubble',   group: 'Chat Bubbles' },
   { key: 'bubbleBorder',       css: '--bubble-border',     label: 'Border Chat Bubble', group: 'Chat Bubbles' },
   { key: 'sidebarBg',          css: '--sidebar-bg',        label: 'Sidebar Bg',       group: 'Sidebar' },
-  { key: 'brandColor',         css: '--brand-color',       label: 'Odysseus Logo',    group: 'Sidebar' },
+  { key: 'brandColor',         css: '--brand-color',       label: 'Jarvis Logo',    group: 'Sidebar' },
   { key: 'hamburgerColor',     css: '--hamburger-color',   label: 'Hamburger Menu',   group: 'Sidebar' },
   { key: 'inputBg',            css: '--input-bg',          label: 'Input Bg',         group: 'Chat Input / Prompt Area' },
   { key: 'inputBorder',        css: '--input-border',      label: 'Input Border',     group: 'Chat Input / Prompt Area' },
@@ -333,7 +377,7 @@ function _updateFavicon(fg) {
   if (routeShape) {
     svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>${routeShape.split('__C__').join(fg)}</svg>`;
   } else {
-    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 4L16 22L6 22Z' fill='${fg}'/><path d='M16 8L16 22L24 22Z' fill='${fg}' opacity='0.6'/><path d='M4 24Q10 20 16 24Q22 28 28 24' stroke='${fg}' stroke-width='2.5' fill='none' stroke-linecap='round'/></svg>`;
+    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text x='16' y='24' text-anchor='middle' font-family='Georgia,serif' font-size='26' font-weight='500' fill='${fg}'>J</text></svg>`;
   }
   const href = 'data:image/svg+xml,' + encodeURIComponent(svg);
   let link = document.querySelector("link[rel='icon']");
@@ -688,11 +732,12 @@ export function initThemeUI() {
         const colors = sw.dataset.custom ? customThemes[name] : THEMES[name];
         if (!colors) return;
         applyColors(colors);
+        applyLuxeClass(sw.dataset.custom ? '' : name);
         clearAllActive();
         sw.classList.add('active');
         syncPickers(colors);
         const ct = sw.dataset.custom ? customThemes[name] : null;
-        const f = ct && ct.font ? ct.font : DEFAULT_FONT;
+        const f = ct && ct.font ? ct.font : (THEME_DEFAULT_FONT[name] || DEFAULT_FONT);
         const d = ct && ct.density ? ct.density : DEFAULT_DENSITY;
         const p = ct && ct.bgPattern ? ct.bgPattern : (THEME_DEFAULT_PATTERN[name] || 'none');
         const ec = ct && ct.bgEffectColor ? ct.bgEffectColor : (THEME_DEFAULT_EFFECT_COLOR[name] || '');
@@ -739,6 +784,7 @@ export function initThemeUI() {
   // Init color pickers from current theme and apply syntax colors
   const currentColors = saved ? saved.colors : THEMES[DEFAULT_THEME];
   applyColors(currentColors);
+  applyLuxeClass(saved ? saved.name : DEFAULT_THEME);
   syncPickers(currentColors);
 
   // Reference colors for per-picker reset (the theme you started from)
@@ -1075,13 +1121,16 @@ export function initThemeUI() {
   syncResetButtons();
 
   // Font, density, background pattern controls
-  const _initFont = (saved && saved.font) || DEFAULT_FONT;
+  const _initFont = (saved && saved.font)
+    || THEME_DEFAULT_FONT[(saved && saved.name) || DEFAULT_THEME]
+    || DEFAULT_FONT;
   const _initDensity = (saved && saved.density) || DEFAULT_DENSITY;
-  const _initPattern = (saved && saved.bgPattern) || (saved && THEME_DEFAULT_PATTERN[saved.name]) || 'none';
-  const _initEffectColor = (saved && saved.bgEffectColor) || (saved && THEME_DEFAULT_EFFECT_COLOR[saved.name]) || '';
+  const _activeThemeName = (saved && saved.name) || DEFAULT_THEME;
+  const _initPattern = (saved && saved.bgPattern) || THEME_DEFAULT_PATTERN[_activeThemeName] || 'none';
+  const _initEffectColor = (saved && saved.bgEffectColor) || THEME_DEFAULT_EFFECT_COLOR[_activeThemeName] || '';
   const _initEffectIntensity = (saved && saved.bgEffectIntensity !== undefined)
     ? saved.bgEffectIntensity
-    : (saved && THEME_DEFAULT_INTENSITY[saved.name] !== undefined ? THEME_DEFAULT_INTENSITY[saved.name] : 1);
+    : (THEME_DEFAULT_INTENSITY[_activeThemeName] !== undefined ? THEME_DEFAULT_INTENSITY[_activeThemeName] : 1);
   const _initEffectSize = (saved && saved.bgEffectSize !== undefined) ? saved.bgEffectSize : 1;
   const _initFrosted = (saved && saved.frosted !== undefined)
     ? !!saved.frosted
@@ -1258,7 +1307,7 @@ export function initThemeUI() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'odysseus_' + (obj.name || 'theme') + '.json';
+      a.download = 'jarvis_' + (obj.name || 'theme') + '.json';
       a.click();
       URL.revokeObjectURL(url);
       newExp.innerHTML = '&#x2713; Downloaded!';

@@ -1,0 +1,279 @@
+/* ============================================================
+   Jarvis — Luxe layer
+   ------------------------------------------------------------
+   Quiet-luxury refinement pass (atelier / gallery themes).
+   Typography, hairlines, radii, focus and motion — layered OVER
+   style.css and scoped to :root.luxe so every other theme keeps
+   its existing look. Component layout and placement unchanged.
+
+   Type system
+     UI        Outfit  (geometric sans, weights 300–600)
+     Display   Fraunces (serif, brand + headings)
+     Code      Fira Code (unchanged)
+   ============================================================ */
+
+/* Self-hosted luxe fonts */
+@font-face { font-family: 'Outfit'; font-weight: 300; font-style: normal; font-display: swap; src: url('/static/fonts/Outfit-Light.woff2') format('woff2'); }
+@font-face { font-family: 'Outfit'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/Outfit-Regular.woff2') format('woff2'); }
+@font-face { font-family: 'Outfit'; font-weight: 500; font-style: normal; font-display: swap; src: url('/static/fonts/Outfit-Medium.woff2') format('woff2'); }
+@font-face { font-family: 'Outfit'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/Outfit-SemiBold.woff2') format('woff2'); }
+@font-face { font-family: 'Fraunces'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/Fraunces-Regular.woff2') format('woff2'); }
+@font-face { font-family: 'Fraunces'; font-weight: 500; font-style: normal; font-display: swap; src: url('/static/fonts/Fraunces-Medium.woff2') format('woff2'); }
+@font-face { font-family: 'Fraunces'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/Fraunces-SemiBold.woff2') format('woff2'); }
+@font-face { font-family: 'Fraunces'; font-weight: 400; font-style: italic; font-display: swap; src: url('/static/fonts/Fraunces-Italic.woff2') format('woff2'); }
+@font-face { font-family: 'Cormorant Garamond'; font-weight: 500; font-style: normal; font-display: swap; src: url('/static/fonts/CormorantGaramond-Medium.woff2') format('woff2'); }
+@font-face { font-family: 'Cormorant Garamond'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/CormorantGaramond-SemiBold.woff2') format('woff2'); }
+
+/* ── Tokens ── */
+
+:root.luxe {
+  /* Pre-boot default; theme.js sets the inline --font-family on boot and
+     a user font choice always wins over this. */
+  --font-family: 'Outfit', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Fraunces', Georgia, serif;
+  /* Hairline used everywhere a heavy border used to sit */
+  --luxe-line: color-mix(in srgb, var(--fg) 12%, transparent);
+  --luxe-line-strong: color-mix(in srgb, var(--fg) 22%, transparent);
+  /* Text on top of the accent (send button, active fills) */
+  --luxe-on-accent: #181410;
+  /* Wordmark face — classical high-contrast serif, letterspaced caps */
+  --font-wordmark: 'Cormorant Garamond', 'Fraunces', Georgia, serif;
+}
+:root[data-luxe="gallery"] {
+  --luxe-on-accent: #faf8f2;
+}
+
+/* ── Base typography ── */
+
+:root.luxe body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+:root.luxe .msg .body { line-height: 1.6; }
+
+/* Inline code stays mono even though the body is now a sans face */
+:root.luxe code { font-family: 'Fira Code', monospace; font-size: 0.86em; }
+:root.luxe pre code { font-size: inherit; }
+
+/* Markdown headings inside AI replies — editorial serif */
+:root.luxe .msg-ai .body h1,
+:root.luxe .msg-ai .body h2,
+:root.luxe .msg-ai .body h3 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0.005em;
+  line-height: 1.25;
+}
+
+/* Text selection — champagne wash */
+:root.luxe ::selection {
+  background: color-mix(in srgb, var(--red) 30%, transparent);
+}
+
+/* ── Scrollbars — hairline, neutral ── */
+
+@supports selector(::-webkit-scrollbar) {
+  :root.luxe ::-webkit-scrollbar { width: 6px; height: 6px; }
+  :root.luxe ::-webkit-scrollbar-track { background: transparent; }
+  :root.luxe ::-webkit-scrollbar-thumb {
+    background-color: color-mix(in srgb, var(--fg) 16%, transparent);
+    border: none;
+    border-radius: 3px;
+  }
+  :root.luxe ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in srgb, var(--fg) 32%, transparent);
+  }
+}
+:root.luxe,
+:root.luxe html {
+  scrollbar-color: color-mix(in srgb, var(--fg) 16%, transparent) transparent;
+}
+
+/* ── Sidebar ── */
+
+:root.luxe .sidebar {
+  box-shadow: none;
+  border: none;
+  border-right: 1px solid var(--luxe-line);
+}
+:root.luxe .sidebar.right-side {
+  border-right: none;
+  border-left: 1px solid var(--luxe-line);
+}
+
+/* Brand — letterspaced serif caps, the wordmark moment */
+:root.luxe .sidebar-brand-title {
+  font-family: var(--font-wordmark);
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--fg);
+}
+:root.luxe .sidebar-brand-title:hover { color: var(--red); }
+
+/* Section labels — letterspaced caps, the Aman signature */
+:root.luxe .section-header-flex h4,
+:root.luxe .section-header-flex .section-title {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg) 52%, transparent);
+}
+:root.luxe .section-header-flex:hover {
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+:root.luxe .section-icon,
+:root.luxe .sidebar-action-icon {
+  stroke: color-mix(in srgb, var(--red) 80%, var(--fg));
+  color: color-mix(in srgb, var(--red) 80%, var(--fg));
+}
+
+:root.luxe .list-item { border-radius: 7px; }
+:root.luxe .session-folder-content .list-item {
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 5%, transparent);
+}
+
+/* ── Chat bubbles — architectural corners, hairline strokes ── */
+
+:root.luxe .msg-user {
+  background: color-mix(in srgb, var(--red) 8%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--red) 22%, transparent);
+  border-radius: 16px 16px 3px 16px;
+}
+:root.luxe .msg-ai {
+  background: var(--panel);
+  border: 1px solid var(--luxe-line);
+  border-radius: 16px 16px 16px 3px;
+}
+:root.luxe .msg { line-height: 1.55; }
+
+/* Role labels — micro caps */
+:root.luxe .msg .role {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+}
+:root.luxe .msg .role::before {
+  width: 5px;
+  height: 5px;
+  background: var(--model-dot, color-mix(in srgb, var(--red) 70%, transparent));
+}
+:root.luxe .msg .timestamp {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--fg) 38%, transparent);
+}
+
+/* Code blocks inside messages — quiet frame */
+:root.luxe .msg .body pre {
+  border: 1px solid var(--luxe-line);
+  border-radius: 10px;
+}
+
+/* RAG sources — hairline card */
+:root.luxe .rag-sources {
+  border: 1px solid var(--luxe-line);
+  border-radius: 10px;
+}
+
+/* ── Welcome screen — the brand moment ── */
+
+:root.luxe #welcome-screen .welcome-name {
+  font-family: var(--font-wordmark);
+  font-weight: 500;
+  font-size: 2.6rem;
+  letter-spacing: 0.34em;
+  /* Compensate the trailing letter-space so the centered wordmark
+     doesn't drift left of the optical center. */
+  padding-left: 0.34em;
+  text-transform: uppercase;
+  background: none;
+  -webkit-text-fill-color: var(--fg);
+  color: var(--fg);
+  margin-bottom: 16px;
+}
+:root.luxe #welcome-screen .welcome-sub {
+  font-weight: 300;
+  font-size: 0.88rem;
+  letter-spacing: 0.05em;
+  opacity: 0.75;
+}
+:root.luxe #welcome-screen .welcome-tip {
+  font-weight: 300;
+  letter-spacing: 0.02em;
+}
+
+/* ── Composer ── */
+
+:root.luxe .chat-input-bar {
+  border: 1px solid var(--luxe-line-strong);
+  border-radius: 16px;
+  padding: 12px 14px;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+:root.luxe .chat-input-bar:focus-within {
+  border-color: color-mix(in srgb, var(--red) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 10%, transparent),
+              0 18px 50px -24px rgba(0, 0, 0, 0.5);
+}
+:root.luxe .chat-input-bar textarea#message {
+  font-size: 14.5px;
+  line-height: 1.55;
+  letter-spacing: 0.005em;
+}
+:root.luxe .chat-input-bar textarea#message::placeholder {
+  color: color-mix(in srgb, var(--fg) 32%, transparent);
+  font-weight: 300;
+  letter-spacing: 0.03em;
+}
+
+/* Send — ink on champagne (porcelain on bronze in gallery) */
+:root.luxe .send-btn {
+  color: var(--luxe-on-accent);
+  border-radius: 9px;
+}
+:root.luxe .send-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--send-btn-bg, var(--red)) 86%, var(--fg));
+}
+
+/* ── Modals — gallery walls ── */
+
+:root.luxe .modal-content {
+  font-family: var(--font-family);
+  letter-spacing: 0;
+  border: 1px solid var(--luxe-line);
+  border-radius: 14px;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--fg) 6%, transparent) inset,
+              0 32px 90px -20px rgba(0, 0, 0, 0.55);
+}
+:root.luxe .modal-header h3,
+:root.luxe .modal-header h2 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* ── Controls ── */
+
+:root.luxe button,
+:root.luxe select,
+:root.luxe input,
+:root.luxe textarea {
+  font-family: inherit;
+}
+:root.luxe button { letter-spacing: 0.015em; }
+
+/* Focus ring — one gold hairline, everywhere */
+:root.luxe :focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--red) 65%, transparent);
+  outline-offset: 2px;
+}
+
+/* ── Density: luxe breathes ── */
+
+:root.luxe .chat-history { scroll-behavior: smooth; }

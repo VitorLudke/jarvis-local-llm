@@ -1,5 +1,5 @@
 /* ============================================ */
-/* Odysseus UI — Consolidated Stylesheet        */
+/* Jarvis UI — Consolidated Stylesheet        */
 /* ============================================ */
 
 
@@ -16,12 +16,14 @@
  */
 
 :root {
-  /* Core palette */
-  --bg: #282c34;
-  --fg: #9cdef2;
-  --panel: #111;
-  --border: #355a66;
-  --red: #e06c75;
+  /* Core palette — atelier (luxe default). theme.js overrides these inline
+     from the saved theme on boot; this is only the no-localStorage first
+     paint. */
+  --bg: #131110;
+  --fg: #eae3d3;
+  --panel: #1a1714;
+  --border: #39322a;
+  --red: #c5a368;
   /* Were `var(--green)` / `var(--warn)` — self-referential, so they
      resolved to invalid and every site fell back to its own literal
      (or, for sites with no fallback, painted as transparent/inherit).
@@ -5498,7 +5500,7 @@ body.bg-pattern-sparkles {
     /* (legacy toolbar-toggle styles removed — now using .vis-* classes) */
 
     /* Demo highlight pulse */
-    .odysseus-highlight {
+    .jarvis-highlight {
       outline: 2px solid var(--accent, var(--red)) !important;
       outline-offset: 1px;
       box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, var(--red)) 18%, transparent);
@@ -5626,7 +5628,7 @@ body.bg-pattern-sparkles {
     @media (prefers-reduced-motion: reduce) {
       .th-cursor, .th-modal-group, .th-zone { animation: none !important; }
     }
-    .odysseus-hl-label {
+    .jarvis-hl-label {
       position: absolute;
       top: -22px;
       left: 8px;
@@ -21271,7 +21273,7 @@ body.gallery-selecting .gallery-dl-btn,
 
 /* Welcome name — left-to-right wipe with a touch of horizontal stretch.
    Fires on initial render via the .welcome-name rule; restarts on Nobody⇄
-   Odysseus toggle via JS reflow trick. */
+   Jarvis toggle via JS reflow trick. */
 .welcome-name {
   transform-origin: left center;
   animation: welcome-name-reveal 0.55s cubic-bezier(0.34, 1.32, 0.55, 1) both;

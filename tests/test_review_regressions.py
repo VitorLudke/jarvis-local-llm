@@ -484,7 +484,7 @@ async def test_webhook_tool_reuses_private_url_validation():
     fake_src_db = types.ModuleType("src.database")
     fake_src_db.SessionLocal = fake_core_db.SessionLocal
     fake_src_db.Webhook = object
-    sys.modules.pop("src.webhook_manager", None)
+    prev_wm = sys.modules.pop("src.webhook_manager", None)
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setitem(sys.modules, "core.database", fake_core_db)
     monkeypatch.setitem(sys.modules, "src.database", fake_src_db)
@@ -498,6 +498,23 @@ async def test_webhook_tool_reuses_private_url_validation():
         )
     finally:
         monkeypatch.undo()
+        # The call above lazily re-imported src.webhook_manager bound to the
+        # fake DB modules. Evict that tainted copy and restore the pre-test
+        # entry, or every later webhook test in a shared process inherits a
+        # webhook_manager whose SessionLocal/Webhook are the fakes.
+        #
+        # BOTH places must be restored: `import src.webhook_manager as wm`
+        # compiles to IMPORT_NAME + IMPORT_FROM, and IMPORT_FROM resolves the
+        # submodule via the `src` PACKAGE ATTRIBUTE, not sys.modules. The
+        # tainted import rebound that attribute too.
+        sys.modules.pop("src.webhook_manager", None)
+        _src_pkg = sys.modules.get("src")
+        if prev_wm is not None:
+            sys.modules["src.webhook_manager"] = prev_wm
+            if _src_pkg is not None:
+                _src_pkg.webhook_manager = prev_wm
+        elif _src_pkg is not None and hasattr(_src_pkg, "webhook_manager"):
+            del _src_pkg.webhook_manager
 
     assert result["exit_code"] == 1
     assert "private/internal" in result["error"]

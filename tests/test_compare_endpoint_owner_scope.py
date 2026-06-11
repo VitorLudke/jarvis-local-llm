@@ -19,16 +19,21 @@ from unittest.mock import MagicMock
 # core.session_manager) is cheap under the sqlalchemy MagicMock stubs. The
 # helper resolves ModelEndpoint at call time; we swap in a fake declarative
 # class below. owner_filter stays REAL.
+#
+# Only build the stub when core.database is genuinely absent (sqlalchemy not
+# installed). When the REAL module is loaded (conftest pre-imports it), it
+# must not be touched: replacing Base on the real module turns every later
+# `Base.metadata.create_all(engine)` in the suite into a MagicMock no-op —
+# a dozen "no such table" failures in shared-process runs.
 if "core.database" not in sys.modules:
-    sys.modules["core.database"] = types.ModuleType("core.database")
-_cd = sys.modules["core.database"]
-_cd.Base = MagicMock()
-for _name in (
-    "Session", "ChatMessage", "Document", "DocumentVersion", "GalleryImage",
-    "GalleryAlbum", "SessionLocal", "Comparison", "ModelEndpoint",
-):
-    if not hasattr(_cd, _name):
+    _cd = types.ModuleType("core.database")
+    _cd.Base = MagicMock()
+    for _name in (
+        "Session", "ChatMessage", "Document", "DocumentVersion", "GalleryImage",
+        "GalleryAlbum", "SessionLocal", "Comparison", "ModelEndpoint",
+    ):
         setattr(_cd, _name, MagicMock())
+    sys.modules["core.database"] = _cd
 
 from routes.compare_routes import _owned_endpoint_by_url  # noqa: E402
 
@@ -83,8 +88,15 @@ def _ep(base_url, owner):
 
 
 def _resolve(rows, base_url, owner):
-    sys.modules["core.database"].ModelEndpoint = _ModelEndpoint
-    return _owned_endpoint_by_url(_DB(rows), base_url, owner)
+    # Swap-and-restore: a bare assignment would leave the fake ModelEndpoint
+    # on the (possibly real) core.database for the rest of the process.
+    cd = sys.modules["core.database"]
+    prev = cd.ModelEndpoint
+    cd.ModelEndpoint = _ModelEndpoint
+    try:
+        return _owned_endpoint_by_url(_DB(rows), base_url, owner)
+    finally:
+        cd.ModelEndpoint = prev
 
 
 URL = "https://api.example.com/v1"

@@ -3,9 +3,11 @@ import json
 from datetime import datetime
 
 # conftest.py stubs src.database with a fake module; webhook_manager imports
-# from it, so drop the stub here to load the real module under test.
-if "src.database" in sys.modules:
-    del sys.modules["src.database"]
+# from it, so drop the stub here to load the real module under test. The stub
+# is restored right after the import below — later importers (e.g. llm_core's
+# lazy proxy lookup exercised by test_model_routes) must see the same stub
+# they would get in an isolated per-file run.
+_src_db_stub = sys.modules.pop("src.database", None)
 _core_database = sys.modules.get("core.database")
 _core_database_all = getattr(_core_database, "__all__", None) if _core_database is not None else None
 if (
@@ -25,6 +27,11 @@ if (
 
 import pytest
 from src.webhook_manager import validate_webhook_url
+
+# Real src.webhook_manager (bound to the real src.database) is now cached for
+# this module's use; put the conftest stub back for everyone else.
+if _src_db_stub is not None:
+    sys.modules["src.database"] = _src_db_stub
 
 
 def test_webhook_url_ssrf_mitigation():

@@ -34,6 +34,7 @@ _ABSENT = object()
 _TEMP_STUBS = ("core.database", "core.models", "src.request_models")
 _saved = {name: sys.modules.get(name, _ABSENT) for name in _TEMP_STUBS}
 _saved["core.session_manager"] = sys.modules.get("core.session_manager", _ABSENT)
+_pre_block = set(sys.modules)
 try:
     for _name in _TEMP_STUBS:
         sys.modules[_name] = MagicMock(name=_name)
@@ -47,6 +48,15 @@ finally:
             sys.modules.pop(_name, None)
         else:
             sys.modules[_name] = _val
+    # Anything imported while the stubs were active holds MagicMocks in its
+    # globals (routes.session_routes above all). Leaving those cached hands
+    # the poisoned variant to every later importer in a shared-process run
+    # (e.g. test_archived_sessions_model_filter building a FastAPI router
+    # against a MagicMock response model). Evict them — SR stays alive via
+    # the local reference, exactly as in per-file runs.
+    for _name in set(sys.modules) - _pre_block:
+        if _name.split(".")[0] in ("routes", "core", "src", "services", "companion"):
+            sys.modules.pop(_name, None)
 
 
 # ── backend: GET /api/sessions model redaction ─────────────────────────────

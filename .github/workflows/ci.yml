@@ -53,15 +53,12 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: mkdir -p data  # sqlite DB lives at ./data/app.db
-      # One pytest process per file. Several test files install module-level
-      # stubs (sys.modules MagicMocks, DB engine swaps) that leak into whatever
-      # imports the same modules after them in a shared process — ~18 tests
-      # fail from cross-file pollution in a single run, every file is green on
-      # its own. Sequential (not parallel) because tests share ./data/app.db.
-      - name: pytest (per-file isolation)
-        run: |
-          rc=0
-          for f in tests/test_*.py; do
-            python -m pytest -q --tb=short "$f" || rc=1
-          done
-          exit $rc
+      # Single shared-process run. The cross-file pollution that used to
+      # force one pytest process per file was fixed at the source: the
+      # offending files no longer mutate real modules in place or leave
+      # tainted imports behind in sys.modules (test_compare_endpoint_owner_scope,
+      # test_review_regressions, test_blind_compare_redaction,
+      # test_null_owner_gates, test_webhook_ssrf_resilience). The full suite
+      # now runs green in one process — minutes faster than the loop.
+      - name: pytest
+        run: python -m pytest -q --tb=short tests/

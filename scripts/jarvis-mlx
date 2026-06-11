@@ -29,6 +29,17 @@
 #                    (speculative decoding, ~1.5x tokens/s; empty disables)
 #   MLX_VL_MODEL     default mlx-community/Qwen3-VL-4B-Instruct-4bit
 #   MLX_VENV         default <repo>/venv-mlx (created on first run)
+#   MLX_PROMPT_CACHE_BYTES  default 2G — KV-cache ceiling for the text server.
+#                    mlx_lm.server keeps every conversation's KV cache forever
+#                    by default (~1.9GB per chat with Jarvis-sized prompts);
+#                    unbounded, it OOMs the Metal GPU on 16GB Macs and the
+#                    server dies with kIOGPUCommandBufferCallbackErrorOutOfMemory.
+#                    Reusing a cached conversation deep-copies its KV (2x peak),
+#                    so the ceiling must leave room for weights + 2x ceiling.
+#   MLX_PREFILL_STEP default 512 — prefill chunk size in tokens. The default
+#                    2048 packs long-prompt prefill into Metal command buffers
+#                    big enough to trip the macOS GPU watchdog on 16GB Macs
+#                    (kIOGPUCommandBufferCallbackErrorTimeout kills the server).
 #
 # After the first boot, point Jarvis at the model server once in
 # Settings -> Models: endpoint http://127.0.0.1:8081/v1.
@@ -41,6 +52,8 @@ MLX_VENV="${MLX_VENV:-$JARVIS_DIR/venv-mlx}"
 MLX_MODEL="${MLX_MODEL:-mlx-community/Qwen3-8B-4bit}"
 MLX_DRAFT_MODEL="${MLX_DRAFT_MODEL:-mlx-community/Qwen3-0.6B-4bit}"
 MLX_VL_MODEL="${MLX_VL_MODEL:-mlx-community/Qwen3-VL-4B-Instruct-4bit}"
+MLX_PROMPT_CACHE_BYTES="${MLX_PROMPT_CACHE_BYTES:-2G}"
+MLX_PREFILL_STEP="${MLX_PREFILL_STEP:-512}"
 MLX_PORT=8081
 MLX_VL_PORT=8082
 CHROMA_PORT=8100
@@ -117,8 +130,13 @@ if [[ -z "$(port_pids $MLX_PORT)" ]]; then
   echo "Subindo modelo $MLX_MODEL na porta $MLX_PORT..."
   draft_args=()
   [[ -n "$MLX_DRAFT_MODEL" ]] && draft_args=(--draft-model "$MLX_DRAFT_MODEL" --num-draft-tokens 3)
-  nohup "$MLX_VENV/bin/mlx_lm.server" \
-    --model "$MLX_MODEL" "${draft_args[@]}" --host 127.0.0.1 --port $MLX_PORT \
+  # jarvis_mlx_server.py wraps mlx_lm.server: upstream only honors
+  # --prompt-cache-bytes on the batched path, which a draft model disables.
+  nohup "$MLX_VENV/bin/python" "$SCRIPT_DIR/jarvis_mlx_server.py" \
+    --model "$MLX_MODEL" "${draft_args[@]}" \
+    --prompt-cache-bytes "$MLX_PROMPT_CACHE_BYTES" \
+    --prefill-step-size "$MLX_PREFILL_STEP" \
+    --host 127.0.0.1 --port $MLX_PORT \
     >> "$LOG_DIR/mlx-server.log" 2>&1 &!
 else
   echo "Modelo já rodando (porta $MLX_PORT)"

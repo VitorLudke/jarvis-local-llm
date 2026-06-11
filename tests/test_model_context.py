@@ -186,6 +186,14 @@ class TestLookupKnown:
 class TestGetContextLength:
     def setup_method(self):
         model_context._context_cache.clear()
+        # Neutralize the unified-memory clamp: its heuristic depends on the
+        # host's RAM, and these tests must pass identically on a 16 GB Mac
+        # and on a Linux CI runner.
+        self._saved_cap = model_context._local_serving_cap
+        model_context._local_serving_cap = None
+
+    def teardown_method(self):
+        model_context._local_serving_cap = self._saved_cap
 
     def test_local_endpoint_requeries_same_model_after_restart(self, monkeypatch):
         calls = []
@@ -249,3 +257,72 @@ class TestGetContextLength:
         assert first == model_context.DEFAULT_CONTEXT
         assert second == model_context.DEFAULT_CONTEXT
         assert calls == []
+
+
+class TestLocalServingContextClamp:
+    """The unified-memory guard: models served on this machine (loopback) get
+    their effective context clamped so compaction/trim fire before the Metal
+    GPU runs out of memory — see _local_serving_context_cap."""
+
+    def setup_method(self):
+        model_context._context_cache.clear()
+        self._saved_cap = model_context._local_serving_cap
+
+    def teardown_method(self):
+        model_context._local_serving_cap = self._saved_cap
+
+    def test_loopback_endpoint_is_clamped(self, monkeypatch):
+        model_context._local_serving_cap = 12000
+        monkeypatch.setattr(model_context, "_query_context_length", lambda e, m: 131072)
+
+        ctx = model_context.get_context_length(
+            "http://127.0.0.1:8081/v1/chat/completions", "mlx-community/Qwen3-8B-4bit"
+        )
+        assert ctx == 12000
+
+    def test_loopback_below_cap_untouched(self, monkeypatch):
+        model_context._local_serving_cap = 12000
+        monkeypatch.setattr(model_context, "_query_context_length", lambda e, m: 8192)
+
+        ctx = model_context.get_context_length(
+            "http://localhost:8081/v1/chat/completions", "small-model"
+        )
+        assert ctx == 8192
+
+    def test_private_network_host_not_clamped(self, monkeypatch):
+        # A tailnet/LAN server has its own memory — only loopback is clamped.
+        model_context._local_serving_cap = 12000
+        monkeypatch.setattr(model_context, "_query_context_length", lambda e, m: 131072)
+
+        ctx = model_context.get_context_length(
+            "http://192.168.1.50:8000/v1/chat/completions", "qwen3-on-the-big-box"
+        )
+        assert ctx == 131072
+
+    def test_env_override_wins(self, monkeypatch):
+        monkeypatch.setenv("JARVIS_LOCAL_CONTEXT_CAP", "5000")
+        model_context._local_serving_cap = -1  # force recompute from env
+        monkeypatch.setattr(model_context, "_query_context_length", lambda e, m: 131072)
+
+        ctx = model_context.get_context_length(
+            "http://127.0.0.1:8081/v1/chat/completions", "mlx-community/Qwen3-8B-4bit"
+        )
+        assert ctx == 5000
+
+    def test_env_zero_disables_clamp(self, monkeypatch):
+        monkeypatch.setenv("JARVIS_LOCAL_CONTEXT_CAP", "0")
+        model_context._local_serving_cap = -1  # force recompute from env
+        monkeypatch.setattr(model_context, "_query_context_length", lambda e, m: 131072)
+
+        ctx = model_context.get_context_length(
+            "http://127.0.0.1:8081/v1/chat/completions", "mlx-community/Qwen3-8B-4bit"
+        )
+        assert ctx == 131072
+
+    def test_is_loopback_endpoint(self):
+        assert model_context._is_loopback_endpoint("http://127.0.0.1:8081/v1") is True
+        assert model_context._is_loopback_endpoint("http://localhost:7860/v1") is True
+        assert model_context._is_loopback_endpoint("http://192.168.1.50:8000/v1") is False
+        assert model_context._is_loopback_endpoint("http://100.64.0.1:5000/v1") is False
+        assert model_context._is_loopback_endpoint("https://api.openai.com/v1") is False
+        assert model_context._is_loopback_endpoint("") is False

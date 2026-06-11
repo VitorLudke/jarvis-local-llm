@@ -6,6 +6,9 @@ Provides token estimation for context usage tracking.
 """
 
 import logging
+import os
+import platform
+import subprocess
 import sys
 from typing import Dict, List, Optional
 
@@ -76,6 +79,62 @@ def _is_local_endpoint(url: str) -> bool:
         return host in _LOCAL_HOSTS or host.startswith(_PRIVATE_PREFIXES)
     except Exception:
         return False
+
+
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_local_serving_cap: Optional[int] = -1  # -1 = not computed yet
+
+
+def _is_loopback_endpoint(url: str) -> bool:
+    """True only for servers on THIS machine — private/tailnet hosts have
+    their own memory and don't get the unified-memory context clamp."""
+    try:
+        return (urlparse(url).hostname or "").lower() in _LOOPBACK_HOSTS
+    except Exception:
+        return False
+
+
+def _local_serving_context_cap() -> Optional[int]:
+    """Heuristic context ceiling for models served on this machine's memory.
+
+    A conversation's KV cache is live GPU memory the server cannot evict —
+    an 8B model with fp16 KV costs ~0.3 MB per token, so the advertised
+    window (Qwen3: 131k) is fiction on a 16 GB Mac: the Metal GPU aborts the
+    server around 12-15k tokens of context. Clamping the *effective* window
+    makes the existing compaction/trim pipeline (COMPACT_THRESHOLD at 85%)
+    fire while the machine can still breathe, instead of at 111k tokens.
+
+    JARVIS_LOCAL_CONTEXT_CAP overrides the heuristic (tokens; 0 disables).
+    Non-macOS hosts and Macs with >33 GB get no clamp.
+    """
+    global _local_serving_cap
+    if _local_serving_cap != -1:
+        return _local_serving_cap
+    env = os.getenv("JARVIS_LOCAL_CONTEXT_CAP")
+    if env is not None:
+        try:
+            v = int(env)
+        except ValueError:
+            v = 0
+        _local_serving_cap = v if v > 0 else None
+        return _local_serving_cap
+    cap = None
+    if platform.system() == "Darwin":
+        try:
+            ram_gb = int(subprocess.check_output(
+                ["sysctl", "-n", "hw.memsize"], timeout=2)) >> 30
+            if ram_gb <= 9:
+                cap = 6_000
+            elif ram_gb <= 17:
+                cap = 12_000
+            elif ram_gb <= 25:
+                cap = 20_000
+            elif ram_gb <= 33:
+                cap = 28_000
+        except Exception:
+            cap = None
+    _local_serving_cap = cap
+    return cap
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -229,6 +288,16 @@ def get_context_length(endpoint_url: str, model: str) -> int:
     # the same model id, so always re-query them instead of serving stale cache.
     if not is_local and (ctx != DEFAULT_CONTEXT or configured_kind in ("api", "proxy")):
         _context_cache[model] = ctx
+    # Models served on this machine share its unified memory: clamp the
+    # effective window so compaction/trim fire before the GPU runs out.
+    if _is_loopback_endpoint(endpoint_url):
+        cap = _local_serving_context_cap()
+        if cap and ctx > cap:
+            logger.info(
+                f"Clamping context for locally-served {model}: {ctx} -> {cap} "
+                f"(unified-memory guard; override with JARVIS_LOCAL_CONTEXT_CAP)"
+            )
+            ctx = cap
     logger.info(f"Context length for {model}: {ctx}")
     return ctx
 

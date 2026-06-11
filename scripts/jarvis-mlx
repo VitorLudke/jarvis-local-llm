@@ -12,10 +12,16 @@
 #
 # Usage:
 #   jarvis-mlx               start text + chroma + frontend, open the browser
+#   jarvis-mlx model         pick which model this Mac serves (saved choice)
 #   jarvis-mlx vision        start the vision model on demand (port 8082)
 #   jarvis-mlx vision stop   stop only the vision model (frees ~3 GB)
 #   jarvis-mlx stop          stop everything
 #   jarvis-mlx status        show what's running
+#
+# First run asks which model to serve — a short menu of mlx-community
+# conversions (quantized for the Metal GPU on Apple Silicon), sized to this
+# Mac's RAM, or any other mlx-community id you want. The choice is saved to
+# data/mlx-launcher.conf; change it any time with `jarvis-mlx model`.
 #
 # The vision model does NOT start by default: an 8B text model + draft model
 # + 4B vision model together can exhaust unified memory on a 16 GB Mac and
@@ -23,9 +29,9 @@
 # Bring vision up only when you need it.
 #
 # Models are MLX-community conversions on Hugging Face, downloaded to the
-# standard HF cache on first run. Override with env vars:
-#   MLX_MODEL        default mlx-community/Qwen3-8B-4bit
-#   MLX_DRAFT_MODEL  default mlx-community/Qwen3-0.6B-4bit
+# standard HF cache on first run. Env vars override the saved choice:
+#   MLX_MODEL        any mlx-community id (skips the menu)
+#   MLX_DRAFT_MODEL  default mlx-community/Qwen3-0.6B-4bit for Qwen3 models
 #                    (speculative decoding, ~1.5x tokens/s; empty disables)
 #   MLX_VL_MODEL     default mlx-community/Qwen3-VL-4B-Instruct-4bit
 #   MLX_VENV         default <repo>/venv-mlx (created on first run)
@@ -40,17 +46,13 @@
 #                    2048 packs long-prompt prefill into Metal command buffers
 #                    big enough to trip the macOS GPU watchdog on 16GB Macs
 #                    (kIOGPUCommandBufferCallbackErrorTimeout kills the server).
-#
-# After the first boot, point Jarvis at the model server once in
-# Settings -> Models: endpoint http://127.0.0.1:8081/v1.
 
 set -u
 
 SCRIPT_DIR="${0:A:h}"
 JARVIS_DIR="${JARVIS_DIR:-${SCRIPT_DIR:h}}"
 MLX_VENV="${MLX_VENV:-$JARVIS_DIR/venv-mlx}"
-MLX_MODEL="${MLX_MODEL:-mlx-community/Qwen3-8B-4bit}"
-MLX_DRAFT_MODEL="${MLX_DRAFT_MODEL:-mlx-community/Qwen3-0.6B-4bit}"
+MLX_CONF="$JARVIS_DIR/data/mlx-launcher.conf"
 MLX_VL_MODEL="${MLX_VL_MODEL:-mlx-community/Qwen3-VL-4B-Instruct-4bit}"
 MLX_PROMPT_CACHE_BYTES="${MLX_PROMPT_CACHE_BYTES:-2G}"
 MLX_PREFILL_STEP="${MLX_PREFILL_STEP:-512}"
@@ -61,14 +63,123 @@ APP_PORT="${APP_PORT:-7860}"
 LOG_DIR="${JARVIS_LOG_DIR:-$JARVIS_DIR/logs}"
 mkdir -p "$LOG_DIR"
 
+# Model choice resolution: explicit env > saved config > first-run menu > RAM default.
+_ENV_MODEL="${MLX_MODEL:-}"
+_ENV_DRAFT="${MLX_DRAFT_MODEL-__unset__}"   # unset != empty (empty disables draft)
+[[ -f "$MLX_CONF" ]] && source "$MLX_CONF"
+[[ -n "$_ENV_MODEL" ]] && MLX_MODEL="$_ENV_MODEL"
+[[ "$_ENV_DRAFT" != "__unset__" ]] && MLX_DRAFT_MODEL="$_ENV_DRAFT"
+
 port_pids() { lsof -ti :"$1" 2>/dev/null }
+
+ram_gb() { echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 17179869184) / 1073741824 )) }
+
+recommended_choice() {
+  local ram=$(ram_gb)
+  if   (( ram < 12 )); then echo 1
+  elif (( ram < 24 )); then echo 2
+  elif (( ram < 40 )); then echo 3
+  else echo 4
+  fi
+}
+
+model_for_choice() {
+  case "$1" in
+    1) echo "mlx-community/Qwen3-4B-4bit" ;;
+    2) echo "mlx-community/Qwen3-8B-4bit" ;;
+    3) echo "mlx-community/Qwen3-14B-4bit" ;;
+    4) echo "mlx-community/Qwen3-30B-A3B-4bit" ;;
+    *) echo "" ;;
+  esac
+}
+
+default_draft_for() {
+  # Speculative decoding needs a draft that shares the target's tokenizer —
+  # only pair the Qwen3 0.6B draft with bigger Qwen3 targets.
+  case "$1" in
+    *Qwen3*0.6B*|*Qwen3-0.6B*) echo "" ;;
+    *Qwen3*) echo "mlx-community/Qwen3-0.6B-4bit" ;;
+    *) echo "" ;;
+  esac
+}
+
+choose_model() {
+  local ram=$(ram_gb) rec=$(recommended_choice) choice model
+  echo ""
+  echo "Which model should this Mac serve? (detected RAM: ${ram} GB)"
+  echo "All options are mlx-community conversions — quantized for the Metal GPU"
+  echo "on Apple Silicon, served natively by MLX."
+  echo ""
+  echo "  1) Qwen3-4B-4bit        ~2.3 GB weights   8 GB Macs"
+  echo "  2) Qwen3-8B-4bit        ~4.4 GB weights   16 GB Macs"
+  echo "  3) Qwen3-14B-4bit       ~7.9 GB weights   24 GB+ Macs"
+  echo "  4) Qwen3-30B-A3B-4bit   ~16 GB weights    32 GB+ Macs (MoE, fast)"
+  echo "  5) another mlx-community id (huggingface.co/mlx-community)"
+  echo ""
+  printf "Choice [%s]: " "$rec"
+  read choice
+  choice="${choice:-$rec}"
+  if [[ "$choice" == 5 ]]; then
+    printf "model id (e.g. mlx-community/gemma-3-12b-it-4bit): "
+    read model
+    [[ -z "$model" ]] && model=$(model_for_choice "$rec")
+  else
+    model=$(model_for_choice "$choice")
+    [[ -z "$model" ]] && model=$(model_for_choice "$rec")
+  fi
+  local draft=$(default_draft_for "$model")
+  mkdir -p "$JARVIS_DIR/data"
+  {
+    echo "# Written by jarvis-mlx — model choice. Change with: jarvis-mlx model"
+    echo "MLX_MODEL=\"$model\""
+    echo "MLX_DRAFT_MODEL=\"$draft\""
+  } > "$MLX_CONF"
+  MLX_MODEL="$model"
+  MLX_DRAFT_MODEL="$draft"
+  echo "Saved: $model${draft:+ (+ draft $draft)}"
+}
 
 ensure_mlx_venv() {
   if [[ ! -x "$MLX_VENV/bin/mlx_lm.server" ]]; then
-    echo "Preparando venv MLX em $MLX_VENV (primeira vez)..."
+    echo "Preparando venv MLX em $MLX_VENV (primeira vez, ~2 min)..."
     python3 -m venv "$MLX_VENV"
     "$MLX_VENV/bin/pip" install --quiet --upgrade pip mlx-lm mlx-vlm
   fi
+}
+
+wait_for_model() {
+  local log="$LOG_DIR/mlx-server.log"
+  echo "Waiting for $MLX_MODEL on port $MLX_PORT"
+  echo "(first run downloads the weights to the Hugging Face cache — progress below)"
+  local last="" stalled=0 i
+  for i in {1..540}; do   # hard cap ~45 min (cold download on slow links)
+    if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$MLX_PORT/v1/models"; then
+      printf '\r%-92s\n' "Model ready."
+      return 0
+    fi
+    if [[ -z "$(port_pids $MLX_PORT)" ]] && (( i > 3 )); then
+      echo ""
+      echo "O servidor do modelo morreu ao iniciar — veja $log"
+      return 1
+    fi
+    local prog=$(tail -c 20000 "$log" 2>/dev/null | tr '\r' '\n' | grep -E '%\|' | tail -1 | cut -c1-90)
+    if [[ -n "$prog" && "$prog" != "$last" ]]; then
+      printf '\r  %-90s' "$prog"
+      last="$prog"
+      stalled=0
+    else
+      (( stalled += 1 ))
+    fi
+    if (( stalled > 60 )); then   # ~5 min without new output
+      echo ""
+      echo "Sem progresso há 5 min — veja $log"
+      return 1
+    fi
+    sleep 5
+  done
+  echo ""
+  echo "Modelo não respondeu — veja $log"
+  return 1
 }
 
 case "${1:-start}" in
@@ -88,6 +199,13 @@ case "${1:-start}" in
     [[ -n "$(port_pids $MLX_VL_PORT)" ]] && echo "visão:    ok (porta $MLX_VL_PORT)" || echo "visão:    parada (sob demanda: jarvis-mlx vision)"
     [[ -n "$(port_pids $CHROMA_PORT)" ]] && echo "chroma:   ok (porta $CHROMA_PORT)" || echo "chroma:   parado"
     [[ -n "$(port_pids $APP_PORT)" ]] && echo "frontend: ok (porta $APP_PORT)" || echo "frontend: parado"
+    exit 0
+    ;;
+  model)
+    choose_model
+    if [[ -n "$(port_pids $MLX_PORT)" ]]; then
+      echo "Modelo atual ainda em execução — aplique a troca com: jarvis-mlx stop && jarvis-mlx"
+    fi
     exit 0
     ;;
   vision)
@@ -123,6 +241,22 @@ case "${1:-start}" in
     exit 1
     ;;
 esac
+
+# ---- start path ----
+
+# No model picked yet (no env override, no saved config): ask on a terminal,
+# fall back to the RAM-sized default when non-interactive.
+if [[ -z "${MLX_MODEL:-}" ]]; then
+  if [[ -t 0 ]]; then
+    choose_model
+  else
+    MLX_MODEL=$(model_for_choice $(recommended_choice))
+    MLX_DRAFT_MODEL=$(default_draft_for "$MLX_MODEL")
+    echo "Sem terminal interativo — usando o padrão para esta RAM: $MLX_MODEL"
+  fi
+fi
+# Draft never chosen explicitly (no env, no config line): pair by model family.
+[[ "${MLX_DRAFT_MODEL-__unset__}" == "__unset__" ]] && MLX_DRAFT_MODEL=$(default_draft_for "$MLX_MODEL")
 
 ensure_mlx_venv
 
@@ -160,23 +294,57 @@ else
   echo "ChromaDB já rodando (porta $CHROMA_PORT)"
 fi
 
+# Remember where the app log ends now so we only surface *this boot's*
+# first-run admin password, never one from an old log.
+_APP_LOG_OFFSET=0
+[[ -f "$LOG_DIR/app.log" ]] && _APP_LOG_OFFSET=$(wc -c < "$LOG_DIR/app.log" | tr -d ' ')
+
 if [[ -z "$(port_pids $APP_PORT)" ]]; then
   echo "Subindo Jarvis na porta $APP_PORT..."
+  # Seed the model picker on first boot: the app creates this endpoint when
+  # no endpoint with the same base_url exists, so a fresh install needs no
+  # manual Settings → Models step. Existing installs are left untouched.
+  export JARVIS_SEED_MODEL_ENDPOINT="http://127.0.0.1:$MLX_PORT/v1"
+  export JARVIS_SEED_MODEL_ENDPOINT_NAME="MLX local (Apple Silicon)"
   (cd "$JARVIS_DIR" && nohup ./start-macos.sh >> "$LOG_DIR/app.log" 2>&1 &!)
 else
   echo "Jarvis já rodando (porta $APP_PORT)"
 fi
 
 printf "Aguardando frontend"
+_FRONTEND_OK=0
 for i in {1..60}; do
   if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$APP_PORT/login"; then
     echo " — pronto!"
-    open "http://127.0.0.1:$APP_PORT"
-    exit 0
+    _FRONTEND_OK=1
+    break
   fi
   printf "."
   sleep 2
 done
-echo
-echo "Frontend não respondeu em 120s — veja $LOG_DIR/app.log"
-exit 1
+if [[ "$_FRONTEND_OK" != 1 ]]; then
+  echo
+  echo "Frontend não respondeu em 120s — veja $LOG_DIR/app.log"
+  exit 1
+fi
+
+# First boot creates the admin account and prints a temporary password — but
+# under nohup that line lands in app.log where nobody sees it. Replay it here.
+if [[ -f "$LOG_DIR/app.log" ]]; then
+  _NEW_LOG=$(tail -c +"$(( _APP_LOG_OFFSET + 1 ))" "$LOG_DIR/app.log" 2>/dev/null)
+  _PASS_LINE=$(echo "$_NEW_LOG" | grep -m1 'Temporary password:')
+  if [[ -n "$_PASS_LINE" ]]; then
+    _USER_LINE=$(echo "$_NEW_LOG" | grep -m1 -o 'admin user created ([^)]*)' | sed 's/.*(\(.*\))/\1/')
+    echo ""
+    echo "┌─ Primeiro acesso ─────────────────────────────────────────────"
+    echo "│ usuário: ${_USER_LINE:-admin}"
+    echo "│ senha temporária: ${_PASS_LINE##*: }"
+    echo "│ Troque a senha depois do primeiro login (Settings → Account)."
+    echo "└────────────────────────────────────────────────────────────────"
+  fi
+fi
+
+wait_for_model || echo "A UI já está no ar em http://127.0.0.1:$APP_PORT — o modelo aparece no seletor quando ficar pronto."
+
+open "http://127.0.0.1:$APP_PORT"
+exit 0

@@ -122,11 +122,20 @@ cd jarvis-local-llm
 scripts/jarvis-mlx
 ```
 
-On first run it creates an MLX venv (`mlx-lm` + `mlx-vlm`), downloads the
-default model (`mlx-community/Qwen3-8B-4bit`, ~4.3 GB, with a 0.6B draft
-model for ~1.5x speculative decoding), and opens `http://127.0.0.1:7860`.
-Then point Jarvis at the model server once in **Settings → Models**:
-endpoint `http://127.0.0.1:8081/v1`.
+First run walks you through everything:
+
+1. **Pick your model.** A short menu of
+   [mlx-community](https://huggingface.co/mlx-community) conversions —
+   quantized for the Metal GPU, served natively by MLX — sized to your Mac's
+   RAM (4B for 8 GB, 8B for 16 GB, 14B for 24 GB+, 30B-A3B for 32 GB+), or
+   type any other mlx-community id. Qwen3 picks get a 0.6B draft model for
+   ~1.5x speculative decoding. Change later with `scripts/jarvis-mlx model`.
+2. **Watch the weights download.** The launcher shows progress and waits for
+   the model server before declaring the stack ready.
+3. **Log in.** The first-boot admin password is printed right in the
+   terminal (it also lives in `logs/app.log`).
+4. **Chat.** The local model server is registered in the model picker
+   automatically — no Settings → Models step needed.
 
 What runs where:
 
@@ -140,10 +149,10 @@ What runs where:
 The vision model doesn't start by default: text (8B) + draft + vision (4B)
 together can exhaust unified memory on a 16 GB Mac and trigger Metal GPU
 timeouts. Bring it up when you need it, drop it with
-`scripts/jarvis-mlx vision stop`. Other subcommands: `stop`, `status`.
-Swap models via env vars (`MLX_MODEL`, `MLX_DRAFT_MODEL`, `MLX_VL_MODEL`) —
-anything from the [mlx-community](https://huggingface.co/mlx-community) hub
-works.
+`scripts/jarvis-mlx vision stop`. Other subcommands: `model`, `stop`,
+`status`. Env vars (`MLX_MODEL`, `MLX_DRAFT_MODEL`, `MLX_VL_MODEL`) override
+the saved model choice — anything from the
+[mlx-community](https://huggingface.co/mlx-community) hub works.
 
 Prefer to manage pieces yourself? `./start-macos.sh` starts only the web UI
 (installs Homebrew deps, creates the venv, runs setup):

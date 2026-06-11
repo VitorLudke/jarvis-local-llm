@@ -859,6 +859,35 @@ async def _startup_event():
             _db.close()
     except Exception as e:
         logger.debug(f"Incognito purge skipped: {e}")
+    # Seed a model endpoint from the environment. scripts/jarvis-mlx exports
+    # JARVIS_SEED_MODEL_ENDPOINT so a fresh install lands with the local MLX
+    # server already in the model picker — no manual Settings → Models step.
+    # Create-only: an existing endpoint with the same base_url is never
+    # touched, so renames/disables made in the UI survive restarts.
+    try:
+        _seed_url = os.getenv("JARVIS_SEED_MODEL_ENDPOINT", "").strip()
+        if _seed_url:
+            import uuid as _uuid
+            from core.database import SessionLocal as _SL, ModelEndpoint as _EP
+            _db = _SL()
+            try:
+                if not _db.query(_EP).filter(_EP.base_url == _seed_url).first():
+                    _name = os.getenv("JARVIS_SEED_MODEL_ENDPOINT_NAME", "Local model").strip() or "Local model"
+                    _db.add(_EP(
+                        id=f"local-{_uuid.uuid4().hex[:8]}",
+                        name=_name,
+                        base_url=_seed_url,
+                        api_key=None,
+                        is_enabled=True,
+                        model_type="llm",
+                        endpoint_kind="local",
+                    ))
+                    _db.commit()
+                    logger.info(f"Seeded model endpoint from env: {_name} @ {_seed_url}")
+            finally:
+                _db.close()
+    except Exception as e:
+        logger.warning(f"Model endpoint seed skipped: {e}")
     # Strong refs to fire-and-forget startup tasks. Without this, Python may
     # GC tasks created with `asyncio.create_task(...)` before they finish.
     _startup_tasks: list[asyncio.Task] = getattr(app.state, "_startup_tasks", [])

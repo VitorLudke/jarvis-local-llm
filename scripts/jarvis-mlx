@@ -184,6 +184,15 @@ wait_for_model() {
 
 case "${1:-start}" in
   stop)
+    # Kill the model watchdog first or it would respawn the server we kill.
+    _wd="$JARVIS_DIR/data/mlx-watchdog.pid"
+    if [[ -f "$_wd" ]]; then
+      _wdpid=$(cat "$_wd" 2>/dev/null)
+      if [[ -n "$_wdpid" ]] && kill -0 "$_wdpid" 2>/dev/null; then
+        kill "$_wdpid" 2>/dev/null && echo "watchdog do modelo parado (pid $_wdpid)"
+      fi
+      rm -f "$_wd"
+    fi
     for port in $APP_PORT $MLX_PORT $MLX_VL_PORT $CHROMA_PORT; do
       pids=$(port_pids $port)
       if [[ -n "$pids" ]]; then
@@ -260,18 +269,42 @@ fi
 
 ensure_mlx_venv
 
+WATCHDOG_PID_FILE="$JARVIS_DIR/data/mlx-watchdog.pid"
+
 if [[ -z "$(port_pids $MLX_PORT)" ]]; then
   echo "Subindo modelo $MLX_MODEL na porta $MLX_PORT..."
   draft_args=()
   [[ -n "$MLX_DRAFT_MODEL" ]] && draft_args=(--draft-model "$MLX_DRAFT_MODEL" --num-draft-tokens 3)
+  mkdir -p "$JARVIS_DIR/data"
+  # Watchdog: Metal failures abort the whole server process (MLX throws inside
+  # Metal's completion-handler thread — nothing can catch it), so the model
+  # would otherwise stay dead until someone notices. Respawn with backoff and
+  # give up after 5 consecutive early deaths so a broken model id doesn't spin
+  # forever. `jarvis-mlx stop` kills the watchdog via the pid file first.
   # jarvis_mlx_server.py wraps mlx_lm.server: upstream only honors
   # --prompt-cache-bytes on the batched path, which a draft model disables.
-  nohup "$MLX_VENV/bin/python" "$SCRIPT_DIR/jarvis_mlx_server.py" \
-    --model "$MLX_MODEL" "${draft_args[@]}" \
-    --prompt-cache-bytes "$MLX_PROMPT_CACHE_BYTES" \
-    --prefill-step-size "$MLX_PREFILL_STEP" \
-    --host 127.0.0.1 --port $MLX_PORT \
-    >> "$LOG_DIR/mlx-server.log" 2>&1 &!
+  (
+    trap '' HUP
+    typeset -i fails=0 t0=0
+    while true; do
+      t0=$(date +%s)
+      "$MLX_VENV/bin/python" "$SCRIPT_DIR/jarvis_mlx_server.py" \
+        --model "$MLX_MODEL" "${draft_args[@]}" \
+        --prompt-cache-bytes "$MLX_PROMPT_CACHE_BYTES" \
+        --prefill-step-size "$MLX_PREFILL_STEP" \
+        --host 127.0.0.1 --port $MLX_PORT
+      rc=$?
+      (( $(date +%s) - t0 > 300 )) && fails=0   # ran >5 min: not a boot loop
+      (( fails += 1 ))
+      if (( fails > 5 )); then
+        echo "[watchdog] modelo caiu $fails vezes seguidas (rc=$rc) — desistindo"
+        break
+      fi
+      echo "[watchdog] servidor do modelo caiu (rc=$rc) — reiniciando em $(( fails * 5 ))s"
+      sleep $(( fails * 5 ))
+    done
+  ) >> "$LOG_DIR/mlx-server.log" 2>&1 &!
+  echo $! > "$WATCHDOG_PID_FILE"
 else
   echo "Modelo já rodando (porta $MLX_PORT)"
 fi
